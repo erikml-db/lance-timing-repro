@@ -24,7 +24,7 @@ use std::time::Instant;
 
 const DIM: usize = 768;
 const N: usize = 500_000;
-const URI: &str = "/workspaces/lance-timing-repro/lance-timing-repro/data";
+const URI: &str = "./data";
 const NUM_CENTROIDS: usize = 512;
 const NUM_SUBVECTORS: usize = 48;
 const NUM_BITS: usize = 1;
@@ -32,16 +32,15 @@ const NUM_BITS: usize = 1;
 #[derive(Parser, Debug)]
 struct Args {
     /// The index version to use: v1 or v3
-    #[clap(short, long, default_value = "v3")]
+    #[clap(short, long, default_value = "v1")]
     index_version: String,
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() {
     let args = Args::parse();
 
     let mut dataset = generate_random_dataset().await;
-    // let params = VectorIndexParams::ivf_pq(1, 8, 1, MetricType::L2, 1);
     let params = match args.index_version.as_str() {
         "v1" => VectorIndexParams::ivf_pq(NUM_CENTROIDS, NUM_BITS as u8, NUM_SUBVECTORS, MetricType::L2, 50),
         "v3" => VectorIndexParams::with_ivf_pq_params_v3(
@@ -60,7 +59,7 @@ async fn main() {
     let mut file = OpenOptions::new()
         .create(true)
         .write(true)
-        .truncate(true)  // This will overwrite if the file exists
+        .truncate(true)
         .open(&file_name)
         .unwrap();
 
@@ -69,11 +68,9 @@ async fn main() {
             .unwrap();
     dataset.validate().await.unwrap();
 
-    // Sequences of values for nprobes and refine_factor
     let nprobes_values = vec![1, 10, 50, 100, 512];
     let refine_factor_values = vec![0, 1, 10, 100];
 
-    // Iterate over nprobes and refine_factor sequences
     for &nprobes in &nprobes_values {
         for &refine_factor in &refine_factor_values {
             writeln!(file, "Running query with nprobes: {}, refine_factor: {}", nprobes, refine_factor).unwrap();
@@ -105,7 +102,7 @@ async fn query_dataset(dataset: &Dataset, nprobes: usize, refine_factor: u32, fi
 
 async fn generate_random_dataset() -> Dataset {
     let mut rng = thread_rng();
-    // Create random data for the `id` column
+
     let mut id_builder = Int32Array::builder(N);
     for i in 0..N {
         id_builder.append_value(i.try_into().unwrap());
@@ -115,7 +112,6 @@ async fn generate_random_dataset() -> Dataset {
     let normal = Normal::new(0.0, 1.0).unwrap();
     
 
-    // Create random data for the `embedding` column
     let mut vectors: Vec<Option<Vec<Option<f32>>>> = Vec::with_capacity(N);
     for _ in 0..N {
         let vector: Vec<Option<f32>> = (0..DIM)
@@ -125,13 +121,11 @@ async fn generate_random_dataset() -> Dataset {
     }
     let embedding_array = Arc::new(FixedSizeListArray::from_iter_primitive::<Float32Type, _, _>(vectors, DIM as i32));
 
-    // Create schema
     let schema = Arc::new(Schema::new(vec![
         Field::new("id", DataType::Int32, false),
         Field::new("embedding", DataType::FixedSizeList(Arc::new(Field::new("item", DataType::Float32, true)), DIM as i32), true),
     ]));
 
-    // Create RecordBatch
     let batch = RecordBatch::try_new(schema.clone(), vec![id_array, embedding_array]);
     let batches = RecordBatchIterator::new([batch], schema.clone());
     let write_params = WriteParams {
