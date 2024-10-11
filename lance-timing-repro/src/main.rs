@@ -30,13 +30,13 @@ const NUM_BITS: usize = 1;
 #[derive(Parser, Debug)]
 struct Args {
     /// The index version to use: v1 or v3
-    #[clap(short, long, default_value = "v1")]
+    #[clap(long, default_value = "v1")]
     index_version: String,
 
-    #[clap(short, long, default_value_t = 500_000)]
+    #[clap(long, default_value_t = 500_000)]
     num_datapoints: usize,
 
-    #[clap(short, long, default_value_t = 512)]
+    #[clap(long, default_value_t = 512)]
     num_centroids: usize,
 }
 
