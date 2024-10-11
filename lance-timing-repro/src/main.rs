@@ -24,7 +24,6 @@ use std::time::Instant;
 
 const DIM: usize = 768;
 const URI: &str = "./data";
-const NUM_CENTROIDS: usize = 512;
 const NUM_SUBVECTORS: usize = 48;
 const NUM_BITS: usize = 1;
 
@@ -36,6 +35,9 @@ struct Args {
 
     #[clap(short, long, default_value_t = 500_000)]
     num_datapoints: usize,
+
+    #[clap(short, long, default_value_t = 512)]
+    num_centroids: usize,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -44,10 +46,10 @@ async fn main() {
 
     let mut dataset = generate_random_dataset(args.num_datapoints).await;
     let params = match args.index_version.as_str() {
-        "v1" => VectorIndexParams::ivf_pq(NUM_CENTROIDS, NUM_BITS as u8, NUM_SUBVECTORS, MetricType::L2, 50),
+        "v1" => VectorIndexParams::ivf_pq(args.num_centroids, NUM_BITS as u8, NUM_SUBVECTORS, MetricType::L2, 50),
         "v3" => VectorIndexParams::with_ivf_pq_params_v3(
             MetricType::L2,
-            IvfBuildParams::new(NUM_CENTROIDS),
+            IvfBuildParams::new(args.num_centroids),
             PQBuildParams::new(NUM_SUBVECTORS, NUM_BITS),
         ),
         _ => {
