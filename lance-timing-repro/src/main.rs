@@ -23,7 +23,6 @@ use lance::index::vector::VectorIndexParams;
 use std::time::Instant;
 
 const DIM: usize = 768;
-const N: usize = 500_000;
 const URI: &str = "./data";
 const NUM_CENTROIDS: usize = 512;
 const NUM_SUBVECTORS: usize = 48;
@@ -34,13 +33,16 @@ struct Args {
     /// The index version to use: v1 or v3
     #[clap(short, long, default_value = "v1")]
     index_version: String,
+
+    #[clap(short, long, default_value_t = 500_000)]
+    num_datapoints: usize,
 }
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let args = Args::parse();
 
-    let mut dataset = generate_random_dataset().await;
+    let mut dataset = generate_random_dataset(args.num_datapoints).await;
     let params = match args.index_version.as_str() {
         "v1" => VectorIndexParams::ivf_pq(NUM_CENTROIDS, NUM_BITS as u8, NUM_SUBVECTORS, MetricType::L2, 50),
         "v3" => VectorIndexParams::with_ivf_pq_params_v3(
@@ -100,11 +102,11 @@ async fn query_dataset(dataset: &Dataset, nprobes: usize, refine_factor: u32, fi
     }
 }
 
-async fn generate_random_dataset() -> Dataset {
+async fn generate_random_dataset(num_datapoints: usize) -> Dataset {
     let mut rng = thread_rng();
 
-    let mut id_builder = Int32Array::builder(N);
-    for i in 0..N {
+    let mut id_builder = Int32Array::builder(num_datapoints);
+    for i in 0..num_datapoints {
         id_builder.append_value(i.try_into().unwrap());
     }
     let id_array = Arc::new(id_builder.finish()) as ArrayRef;
@@ -112,8 +114,8 @@ async fn generate_random_dataset() -> Dataset {
     let normal = Normal::new(0.0, 1.0).unwrap();
     
 
-    let mut vectors: Vec<Option<Vec<Option<f32>>>> = Vec::with_capacity(N);
-    for _ in 0..N {
+    let mut vectors: Vec<Option<Vec<Option<f32>>>> = Vec::with_capacity(num_datapoints);
+    for _ in 0..num_datapoints {
         let vector: Vec<Option<f32>> = (0..DIM)
             .map(|_| Some(normal.sample(&mut rng) as f32))
             .collect();
