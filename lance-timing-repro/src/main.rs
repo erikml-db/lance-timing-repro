@@ -38,6 +38,9 @@ struct Args {
 
     #[clap(long, default_value_t = 512)]
     num_centroids: usize,
+
+    #[clap(long, default_value = "default")]
+    query_type: String,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -78,14 +81,24 @@ async fn main() {
     for &nprobes in &nprobes_values {
         for &refine_factor in &refine_factor_values {
             writeln!(file, "Running query with nprobes: {}, refine_factor: {}", nprobes, refine_factor).unwrap();
-            query_dataset(&dataset, nprobes, refine_factor, &mut file).await;
+            query_dataset(&dataset, nprobes, refine_factor, &mut file, &args.query_type).await;
         }
     }
 }
 
-async fn query_dataset(dataset: &Dataset, nprobes: usize, refine_factor: u32, file: &mut std::fs::File) {
+async fn query_dataset(dataset: &Dataset, nprobes: usize, refine_factor: u32, file: &mut std::fs::File, query_type: &str) {
     let mut scanner = dataset.scan();
-    let query = vec![0.1; DIM];
+    let default_query = vec![0.1; DIM];
+    let mut rng = thread_rng();
+    let normal = Normal::new(0.0, 1.0).unwrap();
+    let query = match query_type {
+        "default" => default_query,
+        "random" => (0..DIM)
+                    .map(|_| normal.sample(&mut rng) as f32)
+                    .collect(),
+        _ => panic!("query_type: {} is not defined.", query_type)
+
+    };
     let f32_array = Float32Array::from(query);
     scanner.nearest("embedding", &f32_array, 10).unwrap();
     if nprobes > 0 {
