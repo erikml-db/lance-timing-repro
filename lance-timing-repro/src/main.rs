@@ -22,9 +22,7 @@ use lance::index::vector::VectorIndexParams;
 
 use std::time::Instant;
 
-const DIM: usize = 768;
 const URI: &str = "./data";
-const NUM_SUBVECTORS: usize = 48;
 const NUM_BITS: usize = 1;
 
 #[derive(Parser, Debug)]
@@ -41,19 +39,24 @@ struct Args {
 
     #[clap(long, default_value = "default")]
     query_type: String,
+
+    #[clap(long, default_value_t = 768)]
+    dim: usize,
 }
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let args = Args::parse();
 
-    let mut dataset = generate_random_dataset(args.num_datapoints).await;
+    let num_subvectors: usize = args.dim / 16;
+
+    let mut dataset = generate_random_dataset(args.num_datapoints, args.dim).await;
     let params = match args.index_version.as_str() {
-        "v1" => VectorIndexParams::ivf_pq(args.num_centroids, NUM_BITS as u8, NUM_SUBVECTORS, MetricType::L2, 50),
+        "v1" => VectorIndexParams::ivf_pq(args.num_centroids, NUM_BITS as u8, num_subvectors, MetricType::L2, 50),
         "v3" => VectorIndexParams::with_ivf_pq_params_v3(
             MetricType::L2,
             IvfBuildParams::new(args.num_centroids),
-            PQBuildParams::new(NUM_SUBVECTORS, NUM_BITS),
+            PQBuildParams::new(num_subvectors, NUM_BITS),
         ),
         _ => {
             eprintln!("Invalid index version provided. Use 'v1' or 'v3'.");
@@ -81,19 +84,19 @@ async fn main() {
     for &nprobes in &nprobes_values {
         for &refine_factor in &refine_factor_values {
             writeln!(file, "Running query with nprobes: {}, refine_factor: {}", nprobes, refine_factor).unwrap();
-            query_dataset(&dataset, nprobes, refine_factor, &mut file, &args.query_type).await;
+            query_dataset(&dataset, nprobes, refine_factor, &mut file, &args.query_type, args.dim).await;
         }
     }
 }
 
-async fn query_dataset(dataset: &Dataset, nprobes: usize, refine_factor: u32, file: &mut std::fs::File, query_type: &str) {
+async fn query_dataset(dataset: &Dataset, nprobes: usize, refine_factor: u32, file: &mut std::fs::File, query_type: &str, dim: usize) {
     let mut scanner = dataset.scan();
-    let default_query = vec![0.1; DIM];
+    let default_query = vec![0.1; dim];
     let mut rng = thread_rng();
     let normal = Normal::new(0.0, 1.0).unwrap();
     let query = match query_type {
         "default" => default_query,
-        "random" => (0..DIM)
+        "random" => (0..dim)
                     .map(|_| normal.sample(&mut rng) as f32)
                     .collect(),
         _ => panic!("query_type: {} is not defined.", query_type)
@@ -117,7 +120,7 @@ async fn query_dataset(dataset: &Dataset, nprobes: usize, refine_factor: u32, fi
     }
 }
 
-async fn generate_random_dataset(num_datapoints: usize) -> Dataset {
+async fn generate_random_dataset(num_datapoints: usize, dim: usize) -> Dataset {
     let mut rng = thread_rng();
 
     let mut id_builder = Int32Array::builder(num_datapoints);
@@ -131,16 +134,16 @@ async fn generate_random_dataset(num_datapoints: usize) -> Dataset {
 
     let mut vectors: Vec<Option<Vec<Option<f32>>>> = Vec::with_capacity(num_datapoints);
     for _ in 0..num_datapoints {
-        let vector: Vec<Option<f32>> = (0..DIM)
+        let vector: Vec<Option<f32>> = (0..dim)
             .map(|_| Some(normal.sample(&mut rng) as f32))
             .collect();
         vectors.push(Some(vector));
     }
-    let embedding_array = Arc::new(FixedSizeListArray::from_iter_primitive::<Float32Type, _, _>(vectors, DIM as i32));
+    let embedding_array = Arc::new(FixedSizeListArray::from_iter_primitive::<Float32Type, _, _>(vectors, dim as i32));
 
     let schema = Arc::new(Schema::new(vec![
         Field::new("id", DataType::Int32, false),
-        Field::new("embedding", DataType::FixedSizeList(Arc::new(Field::new("item", DataType::Float32, true)), DIM as i32), true),
+        Field::new("embedding", DataType::FixedSizeList(Arc::new(Field::new("item", DataType::Float32, true)), dim as i32), true),
     ]));
 
     let batch = RecordBatch::try_new(schema.clone(), vec![id_array, embedding_array]);
