@@ -1,24 +1,24 @@
 use std::fs::OpenOptions;
 use std::io::Write;
 
-use lance::Dataset;
-use lance::dataset::builder::DatasetBuilder;
-use lance::dataset::{WriteMode, WriteParams};
 use arrow::datatypes::Float32Type;
 use arrow::record_batch::{RecordBatch, RecordBatchIterator};
-use std::sync::Arc;
 use clap::Parser;
+use lance::dataset::builder::DatasetBuilder;
+use lance::dataset::{WriteMode, WriteParams};
+use lance::Dataset;
+use std::sync::Arc;
 
-use arrow::array::{ArrayRef, Int32Array, Float32Array, FixedSizeListArray};
+use arrow::array::{ArrayRef, FixedSizeListArray, Float32Array, Int32Array};
 use arrow::datatypes::{DataType, Field, Schema};
 use rand::thread_rng;
 use rand_distr::{Distribution, Normal};
 
-use lance_linalg::distance::MetricType;
-use lance_index::{DatasetIndexExt, IndexType};
-use lance_index::vector::pq::PQBuildParams;
-use lance_index::vector::ivf::IvfBuildParams;
 use lance::index::vector::VectorIndexParams;
+use lance_index::vector::ivf::IvfBuildParams;
+use lance_index::vector::pq::PQBuildParams;
+use lance_index::{DatasetIndexExt, IndexType};
+use lance_linalg::distance::MetricType;
 
 use std::time::Instant;
 
@@ -50,9 +50,17 @@ async fn main() {
 
     let num_subvectors: usize = args.dim / 16;
 
+    println!("Creating dataset");
     let mut dataset = generate_random_dataset(args.num_datapoints, args.dim).await;
+    println!("Creating index");
     let params = match args.index_version.as_str() {
-        "v1" => VectorIndexParams::ivf_pq(args.num_centroids, NUM_BITS as u8, num_subvectors, MetricType::L2, 50),
+        "v1" => VectorIndexParams::ivf_pq(
+            args.num_centroids,
+            NUM_BITS as u8,
+            num_subvectors,
+            MetricType::L2,
+            50,
+        ),
         "v3" => VectorIndexParams::with_ivf_pq_params_v3(
             MetricType::L2,
             IvfBuildParams::new(args.num_centroids),
@@ -73,34 +81,53 @@ async fn main() {
         .open(&file_name)
         .unwrap();
 
-    dataset.create_index(&["embedding"], IndexType::Vector, None, &params, true)
-            .await
-            .unwrap();
+    dataset
+        .create_index(&["embedding"], IndexType::Vector, None, &params, true)
+        .await
+        .unwrap();
     dataset.validate().await.unwrap();
 
     let nprobes_values = vec![1, 10, 50, 100, 512];
     let refine_factor_values = vec![0, 1, 10, 100];
 
+    println!("Running query");
     for &nprobes in &nprobes_values {
         for &refine_factor in &refine_factor_values {
-            writeln!(file, "Running query with nprobes: {}, refine_factor: {}", nprobes, refine_factor).unwrap();
-            query_dataset(&dataset, nprobes, refine_factor, &mut file, &args.query_type, args.dim).await;
+            writeln!(
+                file,
+                "Running query with nprobes: {}, refine_factor: {}",
+                nprobes, refine_factor
+            )
+            .unwrap();
+            query_dataset(
+                &dataset,
+                nprobes,
+                refine_factor,
+                &mut file,
+                &args.query_type,
+                args.dim,
+            )
+            .await;
         }
     }
 }
 
-async fn query_dataset(dataset: &Dataset, nprobes: usize, refine_factor: u32, file: &mut std::fs::File, query_type: &str, dim: usize) {
+async fn query_dataset(
+    dataset: &Dataset,
+    nprobes: usize,
+    refine_factor: u32,
+    file: &mut std::fs::File,
+    query_type: &str,
+    dim: usize,
+) {
     let mut scanner = dataset.scan();
     let default_query = vec![0.1; dim];
     let mut rng = thread_rng();
     let normal = Normal::new(0.0, 1.0).unwrap();
     let query = match query_type {
         "default" => default_query,
-        "random" => (0..dim)
-                    .map(|_| normal.sample(&mut rng) as f32)
-                    .collect(),
-        _ => panic!("query_type: {} is not defined.", query_type)
-
+        "random" => (0..dim).map(|_| normal.sample(&mut rng) as f32).collect(),
+        _ => panic!("query_type: {} is not defined.", query_type),
     };
     let f32_array = Float32Array::from(query);
     scanner.nearest("embedding", &f32_array, 10).unwrap();
@@ -110,12 +137,12 @@ async fn query_dataset(dataset: &Dataset, nprobes: usize, refine_factor: u32, fi
     if refine_factor > 0 {
         scanner.refine(refine_factor);
     }
-    
+
     for _ in 0..10 {
         let start = Instant::now();
         scanner.try_into_batch().await.unwrap();
         let time = start.elapsed();
-        
+
         writeln!(file, "Time: {:?}", time).unwrap();
     }
 }
@@ -130,7 +157,6 @@ async fn generate_random_dataset(num_datapoints: usize, dim: usize) -> Dataset {
     let id_array = Arc::new(id_builder.finish()) as ArrayRef;
 
     let normal = Normal::new(0.0, 1.0).unwrap();
-    
 
     let mut vectors: Vec<Option<Vec<Option<f32>>>> = Vec::with_capacity(num_datapoints);
     for _ in 0..num_datapoints {
@@ -139,11 +165,19 @@ async fn generate_random_dataset(num_datapoints: usize, dim: usize) -> Dataset {
             .collect();
         vectors.push(Some(vector));
     }
-    let embedding_array = Arc::new(FixedSizeListArray::from_iter_primitive::<Float32Type, _, _>(vectors, dim as i32));
+    let embedding_array =
+        Arc::new(FixedSizeListArray::from_iter_primitive::<Float32Type, _, _>(vectors, dim as i32));
 
     let schema = Arc::new(Schema::new(vec![
         Field::new("id", DataType::Int32, false),
-        Field::new("embedding", DataType::FixedSizeList(Arc::new(Field::new("item", DataType::Float32, true)), dim as i32), true),
+        Field::new(
+            "embedding",
+            DataType::FixedSizeList(
+                Arc::new(Field::new("item", DataType::Float32, true)),
+                dim as i32,
+            ),
+            true,
+        ),
     ]));
 
     let batch = RecordBatch::try_new(schema.clone(), vec![id_array, embedding_array]);
