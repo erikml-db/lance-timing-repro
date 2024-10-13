@@ -42,6 +42,12 @@ struct Args {
 
     #[clap(long, default_value_t = 768)]
     dim: usize,
+
+    #[clap(long, default_value_t = 256)]
+    sample_rate: usize,
+
+    #[clap(long, default_value_t = 50)]
+    max_iters: usize,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -53,19 +59,14 @@ async fn main() {
     println!("Creating dataset");
     let mut dataset = generate_random_dataset(args.num_datapoints, args.dim).await;
     println!("Creating index");
+    let mut ivf_params = IvfBuildParams::new(args.num_centroids);
+    ivf_params.max_iters = args.max_iters;
+    ivf_params.sample_rate = args.sample_rate;
+    let pq_params = PQBuildParams::new(num_subvectors, NUM_BITS);
+    let metric_type = MetricType::L2;
     let params = match args.index_version.as_str() {
-        "v1" => VectorIndexParams::ivf_pq(
-            args.num_centroids,
-            NUM_BITS as u8,
-            num_subvectors,
-            MetricType::L2,
-            50,
-        ),
-        "v3" => VectorIndexParams::with_ivf_pq_params_v3(
-            MetricType::L2,
-            IvfBuildParams::new(args.num_centroids),
-            PQBuildParams::new(num_subvectors, NUM_BITS),
-        ),
+        "v1" => VectorIndexParams::with_ivf_pq_params(metric_type, ivf_params, pq_params),
+        "v3" => VectorIndexParams::with_ivf_pq_params_v3(metric_type, ivf_params, pq_params),
         _ => {
             eprintln!("Invalid index version provided. Use 'v1' or 'v3'.");
             return;
